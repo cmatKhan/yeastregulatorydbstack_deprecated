@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "yeastregulatorydbstack"
+version = "0.1.0"
+description = ""
+authors = ["chase mateusiak <chase.mateusiak@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+boto3 = "^1.34.35"
+django-environ = "^0.11.2"
+ruamel-yaml = "^0.18.6"
+
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.1.1"
+isort = "^5.13.2"
+ipython = "^8.21.0"
+ipykernel = "^6.29.2"
+pytest = "^8.0.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,935 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template for PostgreSQL RDS, ElastiCache Redis, EC2 and a ECS/Fargate cluster for a django app complete with VPC, subnets, security groups, and IAM roles.
+
+Parameters:
+
+  VpcCidrBlock:
+    Type: String
+    Default: 172.31.0.0/16
+    Description: The CIDR block for the VPC.
+
+  SubnetACidrBlock:
+    Type: String
+    Default: 172.31.0.0/20
+    Description: The CIDR block for Subnet A.
+
+  PrivateSubnetACidrBlock:
+    Type: String
+    Default: 172.31.48.0/20
+    Description: The CIDR block for Private Subnet A.
+
+  SubnetBCidrBlock:
+    Type: String
+    Default: 172.31.16.0/20
+    Description: The CIDR block for Subnet B.
+
+  PrivateSubnetBCidrBlock:
+    Type: String
+    Default: 172.31.64.0/20
+    Description: The CIDR block for Private Subnet B.
+
+  SubnetCCidrBlock:
+    Type: String
+    Default: 172.31.32.0/20
+    Description: The CIDR block for Subnet C.
+
+  PrivateSubnetCCidrBlock:
+    Type: String
+    Default: 172.31.80.0/20
+    Description: The CIDR block for Private Subnet C
+
+  AppTagValue:
+    Type: String
+    Default: yeastregulatorydb
+    Description: The value for the `app` tag applied to all resources.
+
+
+  DBName:
+    Type: String
+    Description: The name of the database. Eg, yeastregulatorydb
+
+  PostgresUser:
+    Type: String
+    Description: The master username for the RDS instance
+    Default: postgres
+
+  PostgresPassword:
+    Type: String
+    Description: The master password for the RDS instance. Must be at least 8 characters long.
+    NoEcho: true
+
+  PostgresVersion:
+    Type: String
+    Description: The version of Postgres to use for the RDS instance
+    Default: 15.2
+  
+  PostgresVersionFamily:
+    Type: String
+    Description: The version family of Postgres to use for the RDS instance
+    Default: postgres15
+
+  RdsInstanceType:
+    Type: String
+    Description: The instance type for the RDS instance
+    Default: db.t3.micro
+
+  RdsAllocatedStorage:
+    Type: String
+    Description: The allocated storage for the RDS instance
+    Default: 20
+
+  ElasticacheInstanceType:
+    Type: String
+    Description: The instance type for the ElastiCache Redis instance
+    Default: cache.t2.micro
+
+  LogGroup:
+    Description: "The name of the CloudWatch Logs log group."
+    Type: String
+    Default: "djangoappstacklog"
+    
+  DjangoTaskDefinitionCPUs:
+    Type: Number
+    Description: The number of CPUs to use for the Django task definition
+    Default: 256
+
+  DjangoTaskDefinitionMemory:
+    Type: Number
+    Description: The amount of memory to use for the Django task definition
+    Default: 512
+
+  DjangoAppImage:
+    Type: String
+    Description: The Docker image for the Django app. eg 040367161929.dkr.ecr.us-east-2.amazonaws.com/django-stack:latest
+
+  EnvFilePath:
+    Type: String
+    Description: The bucket/file to the environment file for the Django app. eg yeastregulatorydb-strides-tmp/django.env
+
+  CeleryTaskDefinitionCPUs:
+    Type: Number
+    Description: The number of CPUs to use for the Celery task definition
+    Default: 256
+
+  CeleryTaskDefinitionMemory:
+    Type: Number
+    Description: The amount of memory to use for the Celery task definition
+    Default: 512
+
+  CeleryFlowerPort:
+    Type: Number
+    Description: The port for Celery Flower
+    Default: 5555
+
+  CeleryFlowerTaskDefinitionCPUs:
+    Type: Number
+    Description: The number of CPUs to use for the Celery Flower task definition
+    Default: 256
+
+  CeleryFlowerTaskDefinitionMemory:
+    Type: Number
+    Description: The amount of memory to use for the Celery Flower task definition
+    Default: 512
+
+  HostedZoneId:
+    Type: String
+    Description: The ID of the Route 53 Hosted Zone. eg Z046780412JUUGA0O4T7
+
+  SSLCertificateArn:
+    Type: String
+    Description: The ARN of the SSL certificate from AWS Certificate Manager. eg arn:aws:acm:us-east-2:040367161929:certificate/63b33893-d593-4ae0-8f34-c09b2ee96cad
+
+  DNSName:
+    Type: String
+    Description: The DNS name for the record set. Eg, yeastregulatorydb.com
+
+  FlowerHostHeader:
+    Type: String
+    Description: The host header value for the Flower listener rule. Eg, flower.yeastregulatorydb.com
+
+Resources:
+
+  MyVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidrBlock
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  SubnetA:
+    Type: AWS::EC2::Subnet
+    DependsOn:
+      - MyVPC
+      - PublicRoute
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: !Ref SubnetACidrBlock
+      AvailabilityZone: us-east-2a
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  SubnetB:
+    Type: AWS::EC2::Subnet
+    DependsOn:
+      - MyVPC
+      - PublicRoute
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: !Ref SubnetBCidrBlock
+      AvailabilityZone: us-east-2b
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  SubnetC:
+    Type: AWS::EC2::Subnet
+    DependsOn:
+      - MyVPC
+      - PublicRoute
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: !Ref SubnetCCidrBlock
+      AvailabilityZone: us-east-2c
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    DependsOn:
+      - MyVPC
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: !Ref PrivateSubnetACidrBlock
+      AvailabilityZone: us-east-2a
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    DependsOn:
+      - MyVPC
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: !Ref PrivateSubnetBCidrBlock
+      AvailabilityZone: us-east-2b
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  PrivateSubnetC:
+    Type: AWS::EC2::Subnet
+    DependsOn:
+      - MyVPC
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: !Ref PrivateSubnetCCidrBlock
+      AvailabilityZone: us-east-2c
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  MyInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    DependsOn:
+      - MyVPC
+    Properties:
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    DependsOn:
+      - MyVPC
+      - MyInternetGateway
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref MyInternetGateway
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: PrivateRouteTable
+
+  MyPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    DependsOn:
+      - MyVPC
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn:
+      - MyPublicRouteTable
+      - AttachGateway
+    Properties:
+      RouteTableId: !Ref MyPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MyInternetGateway
+
+  SubnetRouteTableAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn:
+      - MyPublicRouteTable
+      - SubnetA
+    Properties:
+      SubnetId: !Ref SubnetA
+      RouteTableId: !Ref MyPublicRouteTable
+
+  SubnetRouteTableAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn:
+      - MyPublicRouteTable
+      - SubnetB
+    Properties:
+      SubnetId: !Ref SubnetB
+      RouteTableId: !Ref MyPublicRouteTable
+
+  SubnetRouteTableAssociationC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn:
+      - MyPublicRouteTable
+      - SubnetC
+    Properties:
+      SubnetId: !Ref SubnetC
+      RouteTableId: !Ref MyPublicRouteTable
+
+  AssociationPrivateSubnetA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn:
+      - PrivateRouteTable
+      - PrivateSubnetA
+    Properties:
+      SubnetId: !Ref PrivateSubnetA
+      RouteTableId: !Ref PrivateRouteTable
+
+  AssociationPrivateSubnetB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn:
+      - PrivateRouteTable
+      - PrivateSubnetB
+    Properties:
+      SubnetId: !Ref PrivateSubnetB
+      RouteTableId: !Ref PrivateRouteTable
+
+  AssociationPrivateSubnetC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn:
+      - PrivateRouteTable
+      - PrivateSubnetC
+    Properties:
+      SubnetId: !Ref PrivateSubnetC
+      RouteTableId: !Ref PrivateRouteTable
+
+  DjangoSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn:
+      - MyVPC
+    Properties:
+      GroupDescription: Security group for Django ECS service allowing HTTP and HTTPS traffic
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  RedisSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn:
+      - MyVPC
+      - DjangoSecurityGroup
+    Properties:
+      GroupDescription: Security group for Redis service
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref DjangoSecurityGroup
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  PostgresSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn:
+      - MyVPC
+      - DjangoSecurityGroup
+    Properties:
+      GroupDescription: Security group for Postgres database
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref DjangoSecurityGroup
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  DjangoStackLoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn:
+      - MyVPC
+    Properties:
+      GroupDescription: "Security group for ALB allowing HTTP and HTTPS traffic"
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+  
+  DjangoEC2SecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      DependsOn:
+          - MyVPC
+      Properties:
+        GroupDescription: Security group for EC2 instance
+        VpcId: !Ref MyVPC
+        SecurityGroupIngress:
+            - IpProtocol: tcp
+              FromPort: 22
+              ToPort: 22
+              CidrIp: 107.200.64.20/32
+            - IpProtocol: tcp
+              FromPort: 80
+              ToPort: 80
+              CidrIp: 0.0.0.0/0
+        Tags:
+          - Key: app
+            Value: !Ref AppTagValue
+
+  MyDBSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      DependsOn:
+          - MyVPC
+          - DjangoEC2SecurityGroup
+          - DjangoSecurityGroup
+      Properties:
+        GroupDescription: Allow access to PostgreSQL
+        VpcId: !Ref MyVPC
+        SecurityGroupIngress:
+            - IpProtocol: tcp
+              FromPort: 5432
+              ToPort: 5432
+              SourceSecurityGroupId: !Ref DjangoEC2SecurityGroup
+            - IpProtocol: tcp
+              FromPort: 5432
+              ToPort: 5432
+              SourceSecurityGroupId: !Ref DjangoSecurityGroup
+        Tags:
+          - Key: app
+            Value: !Ref AppTagValue
+
+  MyCacheSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      DependsOn:
+          - MyVPC
+          - DjangoEC2SecurityGroup
+      Properties:
+        GroupDescription: Allow access to Redis
+        VpcId: !Ref MyVPC
+        SecurityGroupIngress:
+            - IpProtocol: tcp
+              FromPort: 6379
+              ToPort: 6379
+              SourceSecurityGroupId: !Ref DjangoEC2SecurityGroup
+        Tags:
+          - Key: app
+            Value: !Ref AppTagValue
+
+  MyCustomParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: Custom parameter group for my DB
+      Family: !Ref PostgresVersionFamily
+      Parameters:
+        max_connections: "200"
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  MyDBProxyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: rds.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: RDSProxyPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource: '*'
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  MyDBSecret:
+    Type: AWS::SecretsManager::Secret
+    DependsOn: MyDBInstance
+    Properties:
+      Name: MyDBSecret
+      Description: RDS database credentials
+      SecretString: !Sub '{"username": "${PostgresUser}", "password": "${PostgresPassword}"}'
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  MyDBProxy:
+    Type: AWS::RDS::DBProxy
+    DependsOn:
+      - MyDBProxyRole
+      - MyDBSecret
+    Properties:
+      DBProxyName: mydbproxy
+      EngineFamily: POSTGRESQL
+      Auth:
+        - AuthScheme: SECRETS
+          IAMAuth: DISABLED
+          SecretArn: !Ref MyDBSecret
+      RoleArn: !GetAtt MyDBProxyRole.Arn
+      VpcSecurityGroupIds:
+        - !Ref MyDBSecurityGroup
+      VpcSubnetIds:
+        - !Ref SubnetA
+        - !Ref SubnetB
+        - !Ref SubnetC
+      RequireTLS: false
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  MyDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: "My DB Subnet Group"
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+        - !Ref PrivateSubnetC
+
+  MyDBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: !Ref DBName
+      AllocatedStorage: !Ref RdsAllocatedStorage
+      DBInstanceClass: !Ref RdsInstanceType
+      Engine: postgres
+      EngineVersion: !Ref PostgresVersion
+      MasterUsername: !Ref PostgresUser
+      MasterUserPassword: !Ref PostgresPassword
+      BackupRetentionPeriod: 3
+      DBSubnetGroupName: !Ref MyDBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref MyDBSecurityGroup
+      DBParameterGroupName: !Ref MyCustomParameterGroup
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  MyElastiCacheSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: "Subnet group for ElastiCache"
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+        - !Ref PrivateSubnetC
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  MyElastiCacheRedis:
+    Type: AWS::ElastiCache::CacheCluster
+    DependsOn:
+      - MyCacheSecurityGroup
+      - RedisSecurityGroup
+      - MyElastiCacheSubnetGroup
+    Properties:
+      CacheNodeType: !Ref ElasticacheInstanceType
+      Engine: redis
+      NumCacheNodes: 1
+      VpcSecurityGroupIds:
+        - !Ref MyCacheSecurityGroup
+        - !Ref RedisSecurityGroup
+      CacheSubnetGroupName: !Ref MyElastiCacheSubnetGroup
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+    
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+      Path: /
+      Policies:
+        - PolicyName: ECSExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:StartTask
+                  - ecs:StopTask
+                  - ecs:DescribeTasks
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:CreateLogGroup
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${EnvFilePath}"
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+      Path: /
+      Policies:
+        - PolicyName: DjangoAppPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:*
+                  - rds:*
+                  - secretsmanager:GetSecretValue
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: '*'
+
+  MyApplicationLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/${LogGroup}"
+      RetentionInDays: 14
+
+  DjangoAppEcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      CapacityProviders:
+        - FARGATE
+      ClusterName: DjangoAppCluster
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  DjangoTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn:
+      - MyVPC
+    Properties:
+      VpcId: !Ref MyVPC
+      Port: 5000
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /healthcheck
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+
+  DjangoTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    DependsOn:
+      - ExecutionRole
+      - TaskRole
+      - MyElastiCacheRedis
+      - MyDBInstance
+      - MyApplicationLogGroup
+    Properties:
+      Family: django-app-family
+      Cpu: !Ref DjangoTaskDefinitionCPUs
+      Memory: !Ref DjangoTaskDefinitionMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: django
+          Image: !Ref DjangoAppImage
+          Command:
+            - "tail"
+            - "-f"
+            - "/dev/null"
+          Cpu: !Ref DjangoTaskDefinitionCPUs
+          Memory: !Ref DjangoTaskDefinitionMemory
+          Environment:
+            - Name: AWS_DEFAULT_REGION
+              Value: !Ref "AWS::Region"
+            - Name: AWS_S3_REGION_NAME
+              Value: !Ref "AWS::Region"
+            - Name: REDIS_HOST
+              Value: !GetAtt MyElastiCacheRedis.RedisEndpoint.Address
+            - Name: REDIS_PORT
+              Value: !GetAtt MyElastiCacheRedis.RedisEndpoint.Port
+            - Name: POSTGRES_HOST
+              Value: !GetAtt MyDBInstance.Endpoint.Address
+            - Name: POSTGRES_PORT
+              Value: !GetAtt MyDBInstance.Endpoint.Port
+            - Name: POSTGRES_DB
+              Value: !Ref DBName
+            - Name: POSTGRES_USER
+              Value: !Ref PostgresUser
+            - Name: POSTGRES_PASSWORD
+              Value: !Ref PostgresPassword
+          EnvironmentFiles:
+            - Value: !Sub "arn:aws:s3:::${EnvFilePath}"
+              Type: s3
+          PortMappings:
+            - ContainerPort: 5000
+              HostPort: 5000
+              Protocol: tcp
+          LogConfiguration:
+            logDriver: awslogs
+            options:
+              awslogs-group: !Sub "/ecs/${LogGroup}"
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: ecs
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  DjangoService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - DjangoAppEcsCluster
+      - DjangoTaskDefinition
+      - SubnetA
+      - SubnetB
+      - SubnetC
+      - DjangoSecurityGroup
+      - DjangoTargetGroup
+    Properties:
+      Cluster: !Ref DjangoAppEcsCluster
+      TaskDefinition: !Ref DjangoTaskDefinition
+      DesiredCount: 1
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !Ref SubnetA
+            - !Ref SubnetB
+            - !Ref SubnetC
+          SecurityGroups:
+            - !GetAtt DjangoSecurityGroup.GroupId
+      LoadBalancers:
+        - TargetGroupArn: !Ref DjangoTargetGroup
+          ContainerName: "django"
+          ContainerPort: 5000
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  DjangoStackLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn:
+      - SubnetA
+      - SubnetB
+      - SubnetC
+      - DjangoStackLoadBalancerSecurityGroup
+    Properties:
+      Name: DjangoStackLoadBalancer
+      Scheme: internet-facing
+      Subnets:
+        - !Ref SubnetA
+        - !Ref SubnetB
+        - !Ref SubnetC
+      SecurityGroups:
+        - !Ref DjangoStackLoadBalancerSecurityGroup
+      Type: application
+      IpAddressType: ipv4
+      Tags:
+        - Key: app
+          Value: !Ref AppTagValue
+
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - DjangoStackLoadBalancer
+    Properties:
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: 443
+            StatusCode: HTTP_301
+      LoadBalancerArn: !Ref DjangoStackLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  DjangoHttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - DjangoStackLoadBalancer
+    Properties:
+      Certificates:
+        - CertificateArn: !Ref SSLCertificateArn
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref DjangoTargetGroup
+      LoadBalancerArn: !Ref DjangoStackLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+
+Outputs:
+
+  VPCId:
+    Description: ID of the VPC
+    Value: !Ref MyVPC
+
+  SubnetAId:
+    Description: ID of Subnet A
+    Value: !Ref SubnetA
+
+  SubnetBId:
+    Description: ID of Subnet B
+    Value: !Ref SubnetB
+
+  SubnetCId:
+    Description: ID of Subnet C
+    Value: !Ref SubnetC
+
+  PrivateSubnetAId:
+    Description: ID of Private Subnet A
+    Value: !Ref PrivateSubnetA
+
+  PrivateSubnetBId:
+    Description: ID of Private Subnet B
+    Value: !Ref PrivateSubnetB
+
+  PrivateSubnetCId:
+    Description: ID of Private Subnet C
+    Value: !Ref PrivateSubnetC
+
+  InternetGatewayId:
+    Description: ID of the Internet Gateway
+    Value: !Ref MyInternetGateway
+
+  PublicRouteTableId:
+    Description: ID of the Public Route Table
+    Value: !Ref MyPublicRouteTable
+
+  DjangoSecurityGroup:
+    Description: Security group for the Django app
+    Value: !GetAtt DjangoSecurityGroup.GroupId
+
+  RedisSecurityGroup:
+    Description: Security group for Redis
+    Value: !GetAtt RedisSecurityGroup.GroupId
+
+  PostgresSecurityGroup:
+    Description: Security group for Postgres
+    Value: !GetAtt PostgresSecurityGroup.GroupId
+
+  DjangoStackLoadBalancerSecurityGroup:
+    Description: Security group for ALB
+    Value: !GetAtt DjangoStackLoadBalancerSecurityGroup.GroupId
+
+  MyDBSecurityGroup:
+    Description: Security group for PostgreSQL
+    Value: !GetAtt MyDBSecurityGroup.GroupId
+
+  MyCacheSecurityGroup:
+    Description: Security group for Redis
+    Value: !GetAtt MyCacheSecurityGroup.GroupId
+
+  DjangoEC2SecurityGroup:
+    Description: Security group for EC2 instance
+    Value: !GetAtt DjangoEC2SecurityGroup.GroupId
+    
+  RDSInstanceEndpoint:
+    Description: Endpoint of the RDS instance
+    Value: !GetAtt MyDBInstance.Endpoint.Address
+
+  RDSProxyEndpoint:
+    Description: Endpoint of the RDS Proxy
+    Value: !GetAtt MyDBProxy.Endpoint
+
+  RedisEndpoint:
+    Description: Endpoint of the Redis ElastiCache instance
+    Value: !GetAtt MyElastiCacheRedis.RedisEndpoint.Address
+
+  DjangoAppCluster:
+    Description: Cluster for the Django app
+    Value: !Ref DjangoAppEcsCluster
+  DjangoAppTaskDefinition:
+    Description: Task definition for the Django app
+    Value: !Ref DjangoTaskDefinition
+    
+  LoadBalancerDNSName:
+    Description: "DNS name of the Application Load Balancer"
+    Value: !GetAtt DjangoStackLoadBalancer.DNSName
+
+  
+  

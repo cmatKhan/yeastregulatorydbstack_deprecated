@@ -1,0 +1,17 @@
+{
+	"cSpell.words": [
+    "moto",
+    "mydatabase",
+    "yeastregulatorydb"
+  ],
+  "editor.tabSize": 2,
+  "editor.detectIndentation": false,
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.black-formatter",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit"
+    },
+  },
+  "isort.args":["--profile", "black"],
+}
